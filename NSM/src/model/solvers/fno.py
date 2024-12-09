@@ -7,7 +7,7 @@ from torch import nn, Tensor
 from src.basis.series import Basis
 from src.basis.fourier import Fourier
 from src.pde.pde import PDE
-from src.model.solvers.base import Spectral
+from src.model.solvers.base import Spectral, linear_lecun_weight_zero_bias
 
 # ---------------------------------------------------------------------------- #
 #                                    SOLVER                                    #
@@ -28,8 +28,10 @@ class SpectralConv(nn.Module):
         self.odim = odim
         self.mode = mode
         self.init = init
-        self.weights = nn.Parameter(SpectralConv.initialize_weights(mode, idim, odim))
-        self.bias = nn.Parameter(torch.randn(*mode, idim) / (idim * odim), True)
+        self.weights = nn.Parameter(
+            SpectralConv.initialize_weights(
+                mode, idim, odim))
+        self.bias = nn.Parameter(torch.zeros(*mode, idim), True)
 
     @staticmethod
     def initialize_weights(mode: tuple[int], idim: int, odim: int) -> Tensor:
@@ -55,21 +57,29 @@ class FNO(Spectral, nn.Module):
     def __init__(self, pde: PDE, cfg: Dict) -> None:
         super().__init__(pde, cfg)
 
-        self.layer_1 = nn.LazyLinear(self.cfg['hdim'] * 4)
-        self.layer_2 = nn.LazyLinear(self.cfg['hdim'])
+        self.layer_1 = linear_lecun_weight_zero_bias(4, self.cfg['hdim'] * 4)
+        self.layer_2 = linear_lecun_weight_zero_bias(
+            self.cfg['hdim'] * 4, self.cfg['hdim'])
 
         self.convs_list = nn.ModuleList()
         self.lins_list = nn.ModuleList()
 
         for _ in range(self.cfg['depth']):
-            conv = SpectralConv(self.cfg['mode'], self.cfg['hdim'], self.cfg['hdim'])
-            linear = nn.LazyLinear(self.cfg['hdim'])
+            conv = SpectralConv(
+                self.cfg['mode'],
+                self.cfg['hdim'],
+                self.cfg['hdim'])
+            linear = linear_lecun_weight_zero_bias(
+                self.cfg['hdim'], self.cfg['hdim'])
             self.convs_list.append(conv)
             self.lins_list.append(linear)
 
-        self.layer_n_minus_3 = nn.LazyLinear(self.cfg['hdim'])
-        self.layer_n_minus_2 = nn.LazyLinear(self.cfg['hdim'] * 4)
-        self.layer_n_minus_1 = nn.LazyLinear(self.pde.odim)
+        self.layer_n_minus_3 = linear_lecun_weight_zero_bias(
+            self.cfg['hdim'], self.cfg['hdim'])
+        self.layer_n_minus_2 = linear_lecun_weight_zero_bias(
+            self.cfg['hdim'], self.cfg['hdim'] * 4)
+        self.layer_n_minus_1 = linear_lecun_weight_zero_bias(
+            self.cfg['hdim'] * 4, self.pde.odim)
 
     def forward(self, phi: Basis) -> Basis:
 

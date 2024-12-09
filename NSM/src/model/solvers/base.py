@@ -1,3 +1,4 @@
+import math
 import functools as F
 from abc import ABC, abstractmethod
 from typing import Dict
@@ -9,6 +10,19 @@ from src.pde.pde import PDE
 from src.utils import Fx
 from src.basis.series import Basis 
 
+
+def lecun_init(param: Tensor):
+    fan_in, _ = nn.init._calculate_fan_in_and_fan_out(param)
+    bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
+    nn.init.normal_(param, -bound, bound)
+
+
+def linear_lecun_weight_zero_bias(in_features: int, out_features: int) -> nn.Module:
+    layer = nn.Linear(in_features, out_features)
+    lecun_init(layer.weight)
+    nn.init.zeros_(layer.bias)
+
+    return layer
 
 # ---------------------------------------------------------------------------- #
 #                                    SOLVER                                    #
