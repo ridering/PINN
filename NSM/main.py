@@ -49,17 +49,19 @@ def main(cfg: Dict[str, Any]):
             def scheduler_fn(epoch):
                 return 1.0
         elif cfg["schd"] == "exp":
-            decay_rate = 1e-3**(1.0 / cfg["iter"])
-            def scheduler_fn(epoch):
-                return decay_rate**epoch
+            decay_rate = 1e-3 ** (1.0 / cfg["iter"])
 
-        scheduler = optim.lr_scheduler.LambdaLR(optimizer,
-                                                lr_lambda=scheduler_fn)
+            def scheduler_fn(epoch):
+                return decay_rate ** epoch
+
+        scheduler = optim.lr_scheduler.LambdaLR(
+            optimizer, lr_lambda=scheduler_fn)
 
         pbar = trange(cfg['iter'])
         loss_hist = []
 
-        wr = writer.SummaryWriter()
+        if cfg['tensorboard']:
+            wr = writer.SummaryWriter()
 
         for epoch in pbar:
 
@@ -80,23 +82,28 @@ def main(cfg: Dict[str, Any]):
 
             avg_loss = np.average(ls)
 
-            wr.add_scalar('loss', avg_loss, epoch + 1)
-            wr.add_scalar('lr', scheduler.get_last_lr()[0], epoch + 1)
-            for param_name, weights in model.named_parameters():
-                if param_name.find('integral') == -1:
-                    flattened_weights = weights.flatten()
-                    wr.add_histogram(param_name,
-                                     flattened_weights,
-                                     epoch + 1,
-                                     bins='tensorflow')
-                else:
-                    if (epoch + 1) % 10 == 0:
+            kernel_type = 'conv' if cfg['model'] == 'fno' else 'integr'
+
+            if cfg['tensorboard']:
+                wr.add_scalar('loss', avg_loss, epoch + 1)
+                wr.add_scalar('lr', scheduler.get_last_lr()[0], epoch + 1)
+                for param_name, weights in model.named_parameters():
+                    if param_name.find(kernel_type) == -1:
                         flattened_weights = weights.flatten()
-                        wr.add_histogram(param_name,
-                                         flattened_weights,
-                                         epoch + 1,
-                                         bins='tensorflow')
-                        wr.flush()
+                        wr.add_histogram(
+                            param_name,
+                            flattened_weights,
+                            epoch + 1,
+                            bins='tensorflow')
+                    else:
+                        if (epoch + 1) % 10 == 0:
+                            flattened_weights = weights.flatten()
+                            wr.add_histogram(
+                                param_name,
+                                flattened_weights,
+                                epoch + 1,
+                                bins='tensorflow')
+                            wr.flush()
 
             if (epoch + 1) % cfg['ckpt'] == 0:
                 torch.save(
@@ -107,7 +114,9 @@ def main(cfg: Dict[str, Any]):
                         'scheduler_state_dict': scheduler.state_dict(),
                         'loss': loss,
                     },
-                    'saves/' + datetime.now().strftime("%Y-%m-%d--%H-%M-%S"))
+                    'saves/' +
+                    datetime.now().strftime("%Y-%m-%d--%H-%M-%S") +
+                    f'epoch_{epoch + 1}')
 
             pbar.set_description(
                 f"LR: {scheduler.get_last_lr()} Loss: {avg_loss:10}")
@@ -129,91 +138,85 @@ if __name__ == "__main__":
     args = argparse.ArgumentParser()
     action = args.add_subparsers(dest="action")
 
-    args.add_argument("--seed", type=int, default=19260817, help="random seed")
-
     args.add_argument("--pde", type=str, help="PDE name")
-    args.add_argument("--model",
-                      type=str,
-                      help="model name",
-                      choices=["fno", "sno"])  # --cheb=cno
-    args.add_argument("--spectral",
-                      dest="spectral",
-                      action="store_true",
-                      help="spectral training")
+    args.add_argument(
+        "--model",
+        type=str,
+        help="model name",
+        choices=[
+            "fno",
+            "sno"])  # --cheb=cno
+    args.add_argument(
+        "--spectral",
+        dest="spectral",
+        action="store_true",
+        help="spectral training")
 
-    # ----------------------------------- MODEL ---------------------------------- #
+# ----------------------------------- MODEL ---------------------------------- #
 
     args.add_argument("--hdim", type=int, help="hidden dimension")
     args.add_argument("--depth", type=int, help="number of layers")
     args.add_argument("--activate", type=str, help="activation name")
 
-    args.add_argument("--mode",
-                      type=int,
-                      nargs="+",
-                      help="number of modes per dim")
-    args.add_argument("--grid",
-                      type=int,
-                      default=256,
-                      help="training grid size")
+    args.add_argument(
+        "--mode",
+        type=int,
+        nargs="+",
+        help="number of modes per dim")
+    args.add_argument(
+        "--grid",
+        type=int,
+        default=256,
+        help="training grid size")
 
-    ## ablation study
+    # ablation study
 
-    args.add_argument("--fourier",
-                      dest="fourier",
-                      action="store_true",
-                      help="fourier basis only")
-    args.add_argument("--cheb",
-                      dest="cheb",
-                      action="store_true",
-                      help="using chebyshev")
+    args.add_argument(
+        "--fourier",
+        dest="fourier",
+        action="store_true",
+        help="fourier basis only")
+    args.add_argument(
+        "--cheb",
+        dest="cheb",
+        action="store_true",
+        help="using chebyshev")
 
-    # ----------------------------------- TRAIN ---------------------------------- #
+# ----------------------------------- TRAIN ---------------------------------- #
 
     args_train = action.add_parser("train", help="train model from scratch")
 
     args_train.add_argument("--bs", type=int, required=True, help="batch size")
-    args_train.add_argument("--lr",
-                            type=float,
-                            required=True,
-                            help="learning rate")
-    args_train.add_argument("--clip",
-                            type=float,
-                            required=False,
-                            help="gradient clipping")
-    args_train.add_argument("--schd",
-                            type=str,
-                            required=True,
-                            help="scheduler name")
-    args_train.add_argument("--iter",
-                            type=int,
-                            required=True,
-                            help="total iterations")
-    args_train.add_argument("--ckpt",
-                            type=int,
-                            required=True,
-                            help="checkpoint every n iters")
-    args_train.add_argument("--note",
-                            type=str,
-                            required=True,
-                            help="leave a note here")
+    args_train.add_argument(
+        "--lr",
+        type=float,
+        required=True,
+        help="learning rate")
+    args_train.add_argument(
+        "--schd",
+        type=str,
+        required=True,
+        help="scheduler name")
+    args_train.add_argument(
+        "--iter",
+        type=int,
+        required=True,
+        help="total iterations")
+    args_train.add_argument(
+        "--ckpt",
+        type=int,
+        required=True,
+        help="checkpoint every n iters")
+    args_train.add_argument(
+        "--tensorboard",
+        action=argparse.BooleanOptionalAction,
+        help="watch training on tensorboard")
 
-    args_train.add_argument("--vmap",
-                            type=lambda x: int(x) if x else None,
-                            help="vectorization size")
-    args_train.add_argument("--save",
-                            dest="save",
-                            action="store_true",
-                            help="save model checkpoints")
+# ----------------------------------- TEST ----------------------------------- #
 
-    # ----------------------------------- TEST ----------------------------------- #
-
-    args_test = action.add_parser("test", help="enter REPL after loading")
-
-    args_test.add_argument("--load", type=str, help="saved model path")
-
-    # ---------------------------------------------------------------------------- #
-    #                                     MAIN                                     #
-    # ---------------------------------------------------------------------------- #
+# ---------------------------------------------------------------------------- #
+#                                     MAIN                                     #
+# ---------------------------------------------------------------------------- #
 
     args = args.parse_args()
     cfg = vars(args)
@@ -221,5 +224,7 @@ if __name__ == "__main__":
 
     pde, model, loss_hist = main(cfg)
 
-    torch.save([model.state_dict(), loss_hist],
-               datetime.now().strftime("%Y-%m-%d--%H-%M-%S"))
+    torch.save([
+        model.state_dict(),
+        loss_hist,
+    ], datetime.now().strftime("%Y-%m-%d--%H-%M-%S"))
