@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 from typing import Any, Dict
 
@@ -60,7 +61,7 @@ def main(cfg: Dict[str, Any]):
         pbar = trange(cfg['iter'])
         loss_hist = []
 
-        if cfg['tensorboard']:
+        if cfg['tensorboard'] > 0:
             wr = writer.SummaryWriter()
 
         for epoch in pbar:
@@ -82,28 +83,17 @@ def main(cfg: Dict[str, Any]):
 
             avg_loss = np.average(ls)
 
-            kernel_type = 'conv' if cfg['model'] == 'fno' else 'integr'
-
-            if cfg['tensorboard']:
+            if cfg['tensorboard'] > 0 and (
+                    epoch + 1) % cfg['tensorboard'] == 0:
                 wr.add_scalar('loss', avg_loss, epoch + 1)
                 wr.add_scalar('lr', scheduler.get_last_lr()[0], epoch + 1)
                 for param_name, weights in model.named_parameters():
-                    if param_name.find(kernel_type) == -1:
-                        flattened_weights = weights.flatten()
-                        wr.add_histogram(
-                            param_name,
-                            flattened_weights,
-                            epoch + 1,
-                            bins='tensorflow')
-                    else:
-                        if (epoch + 1) % 10 == 0:
-                            flattened_weights = weights.flatten()
-                            wr.add_histogram(
-                                param_name,
-                                flattened_weights,
-                                epoch + 1,
-                                bins='tensorflow')
-                            wr.flush()
+                    flattened_weights = weights.flatten()
+                    wr.add_histogram(
+                        param_name,
+                        flattened_weights,
+                        epoch + 1,
+                        bins='tensorflow')
 
             if (epoch + 1) % cfg['ckpt'] == 0:
                 torch.save(
@@ -116,7 +106,7 @@ def main(cfg: Dict[str, Any]):
                     },
                     'saves/' +
                     datetime.now().strftime("%Y-%m-%d--%H-%M-%S") +
-                    f'epoch_{epoch + 1}')
+                    f'--epoch-{epoch + 1}')
 
             pbar.set_description(
                 f"LR: {scheduler.get_last_lr()} Loss: {avg_loss:10}")
@@ -146,11 +136,6 @@ if __name__ == "__main__":
         choices=[
             "fno",
             "sno"])  # --cheb=cno
-    args.add_argument(
-        "--spectral",
-        dest="spectral",
-        action="store_true",
-        help="spectral training")
 
 # ----------------------------------- MODEL ---------------------------------- #
 
@@ -161,7 +146,7 @@ if __name__ == "__main__":
     args.add_argument(
         "--mode",
         type=int,
-        nargs="+",
+        nargs=3,
         help="number of modes per dim")
     args.add_argument(
         "--grid",
@@ -209,7 +194,9 @@ if __name__ == "__main__":
         help="checkpoint every n iters")
     args_train.add_argument(
         "--tensorboard",
-        action=argparse.BooleanOptionalAction,
+        type=int,
+        required=False,
+        default=0,
         help="watch training on tensorboard")
 
 # ----------------------------------- TEST ----------------------------------- #
@@ -222,9 +209,10 @@ if __name__ == "__main__":
     cfg = vars(args)
     print(f"{cfg=}")
 
+    os.makedirs("saves", exist_ok=True)
+
+    curr_datetime = datetime.now().strftime("%Y-%m-%d--%H-%M-%S")
+
     pde, model, loss_hist = main(cfg)
 
-    torch.save([
-        model.state_dict(),
-        loss_hist,
-    ], datetime.now().strftime("%Y-%m-%d--%H-%M-%S"))
+    torch.save(model.state_dict(), 'saves/final-model--' + curr_datetime)
