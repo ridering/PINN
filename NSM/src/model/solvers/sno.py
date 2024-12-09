@@ -27,8 +27,6 @@ class DenseGeneral(nn.Module):
         lecun_init(self.weight)
         self.bias = nn.Parameter(torch.zeros(*self.out_shape), True)
 
-        self._initialize_parameters()
-
     def forward(self, x):
         return torch.tensordot(
             x, self.weight, dims=(
