@@ -74,7 +74,7 @@ class Basis(ABC):
             return self
         ax = self.ix(*map(min, mode, self.mode))
 
-        zero = torch.zeros(mode + self.coef.shape[self.ndim():])
+        zero = self.coef.new_zeros(mode + self.coef.shape[self.ndim():])
         zero[ax] = self.coef[ax]
         return self.__class__(zero)
 
@@ -178,8 +178,12 @@ def series(*types: Type[Series]) -> Type[Basis]:
 
         def __getitem__(self, s: Tuple[int]) -> Tensor:
 
-            return torch.vmap(F.partial(Super.__getitem__, s=s[1:]))(
-                Super(Self(self.coef)[s[0]]))
+            def gett(smth): return F.partial(
+                Super.__getitem__, s=s[1:])(Super(smth))
+
+            got = Self(self.coef)[s[0]]
+
+            return torch.vmap(gett)(got)
 
 # --------------------------------- TRANSFORM -------------------------------- #
 
