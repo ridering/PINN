@@ -17,8 +17,7 @@ from src.validate import evaluate
 
 import torch
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-torch.set_default_device(device)
+torch.set_default_device(DEVICE)
 
 
 def main(cfg: Dict[str, Any]):
@@ -76,13 +75,10 @@ def main(cfg: Dict[str, Any]):
 
             phi = pde.params.sample((cfg['bs'], ))
 
-            total_loss = 0.0
-            for batch in phi.coef:
-                loss = model.loss(pde.basis(batch))['residual']
-                loss.backward()
-                total_loss += loss.item()
-
-            avg_loss = total_loss / cfg['bs']
+            def mapper(smth): return model.loss(pde.basis(smth))['residual']
+            loss = torch.vmap(mapper, chunk_size=cfg['vmap'])(phi.coef)
+            avg_loss = loss.cpu().detach().mean()
+            loss.mean().backward()
 
             optimizer.step()
             scheduler.step()
@@ -91,45 +87,47 @@ def main(cfg: Dict[str, Any]):
 
             avg_avg_loss += avg_loss
 
-            if cfg['tensorboard'] > 0 and (
-                    epoch + 1) % cfg['tensorboard'] == 0:
-                wr.add_scalar('loss', avg_avg_loss / cfg['tensorboard'],
-                              epoch + 1)
+            with torch.no_grad():
+                if cfg['tensorboard'] > 0 and (
+                        epoch + 1) % cfg['tensorboard'] == 0:
 
-                model.eval()
-                metric, predictions = evaluate(model)
+                    wr.add_scalar('loss', avg_avg_loss / cfg['tensorboard'],
+                                  epoch + 1)
 
-                for key, val in metric.items():
-                    wr.add_scalar(key, val, epoch + 1)
+                    model.eval()
+                    metric, predictions = evaluate(model)
 
-                wr.add_image('u[1]_pred',
-                             predictions[1][1][-1].squeeze(),
-                             dataformats="HW",
-                             global_step=epoch + 1)
-                model.train()
+                    for key, val in metric.items():
+                        wr.add_scalar(key, val, epoch + 1)
 
-                wr.add_scalar('lr', scheduler.get_last_lr()[0], epoch + 1)
-                for param_name, weights in model.named_parameters():
-                    flattened_weights = weights.flatten()
-                    wr.add_histogram(
-                        param_name,
-                        flattened_weights,
-                        epoch + 1,
-                        bins='tensorflow')
-                avg_avg_loss = 0.0
+                    wr.add_image('u[1]_pred',
+                                 predictions[1][1][-1].squeeze(),
+                                 dataformats="HW",
+                                 global_step=epoch + 1)
+                    model.train()
 
-            if (epoch + 1) % cfg['ckpt'] == 0:
-                torch.save(
-                    {
-                        'epoch': epoch,
-                        'model_state_dict': model.state_dict(),
-                        'optimizer_state_dict': optimizer.state_dict(),
-                        'scheduler_state_dict': scheduler.state_dict(),
-                        'loss': loss,
-                    },
-                    'saves/' +
-                    datetime.now().strftime("%Y-%m-%d--%H-%M-%S") +
-                    f'--epoch-{epoch + 1}')
+                    wr.add_scalar('lr', scheduler.get_last_lr()[0], epoch + 1)
+                    for param_name, weights in model.named_parameters():
+                        flattened_weights = weights.flatten()
+                        wr.add_histogram(
+                            param_name,
+                            flattened_weights,
+                            epoch + 1,
+                            bins='tensorflow')
+                    avg_avg_loss = 0.0
+
+                if (epoch + 1) % cfg['ckpt'] == 0:
+                    torch.save(
+                        {
+                            'epoch': epoch,
+                            'model_state_dict': model.state_dict(),
+                            'optimizer_state_dict': optimizer.state_dict(),
+                            'scheduler_state_dict': scheduler.state_dict(),
+                            'loss': loss,
+                        },
+                        'saves/' +
+                        datetime.now().strftime("%Y-%m-%d--%H-%M-%S") +
+                        f'--epoch-{epoch + 1}')
 
             pbar.set_description(
                 f"LR: {scheduler.get_last_lr()} Loss: {avg_loss:10}")
@@ -221,6 +219,13 @@ if __name__ == "__main__":
         required=False,
         default=0,
         help="watch training on tensorboard")
+    args_train.add_argument(
+        "--vmap",
+        type=int,
+        required=False,
+        default=1,
+        help="parallel computation")
+
 
 # ----------------------------------- TEST ----------------------------------- #
 
