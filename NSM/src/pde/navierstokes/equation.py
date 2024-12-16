@@ -152,9 +152,9 @@ ic = Initial(0.8)
 
 # # ------------------------------- UNFORCED FLOW ------------------------------ #
 
-# re2 = NavierStokes(ic, T=3, nu=1e-2)
+re2 = NavierStokes(ic, T=3, nu=1e-2)
 re3 = NavierStokes(ic, T=3, nu=1e-3)
-# re4 = NavierStokes(ic, T=3, nu=1e-4)
+re4 = NavierStokes(ic, T=3, nu=1e-4)
 
 # # ------------------------------ TRANSIENT FLOW ------------------------------ #
 

@@ -9,6 +9,22 @@ from src.basis.fourier import Fourier
 from src.pde.pde import PDE
 from src.model.solvers.base import Spectral, linear_lecun_weight_zero_bias
 
+
+def create_weight_bias(mode: tuple[int], idim: int, odim: int) -> Tensor:
+
+    weight_shape = (*mode, idim, odim)
+    # weight = torch.randn(weight_shape) * scale
+    weight = torch.empty(weight_shape)
+    nn.init.kaiming_uniform_(weight, a=math.sqrt(5))
+
+    bias = torch.empty(*mode, idim)
+    fan_in, _ = nn.init._calculate_fan_in_and_fan_out(weight)
+    if fan_in != 0:
+        bound = 1 / math.sqrt(fan_in)
+        nn.init.uniform_(bias, -bound, bound)
+
+    return weight, bias
+
 # ---------------------------------------------------------------------------- #
 #                                    SOLVER                                    #
 # ---------------------------------------------------------------------------- #
@@ -28,22 +44,15 @@ class SpectralConv(nn.Module):
         self.odim = odim
         self.mode = mode
         self.init = init
-        self.weights = nn.Parameter(
-            SpectralConv.initialize_weights(
-                mode, idim, odim))
-        self.bias = nn.Parameter(torch.zeros(*mode, idim), True)
 
-    @staticmethod
-    def initialize_weights(mode: tuple[int], idim: int, odim: int) -> Tensor:
+        w, b = create_weight_bias(mode, idim, odim)
 
-        scale = 1 / (idim * odim)
-        weight_shape = (*mode, idim, odim)
-        weight = torch.randn(weight_shape) * scale
-        return weight
+        self.weight = nn.Parameter(w, True)
+        self.bias = nn.Parameter(b, True)
 
     def forward(self, u):
         def W(a):
-            result = torch.einsum("ijkl,ijklm->ijkm", a, self.weights)
+            result = torch.einsum("ijkl,ijklm->ijkm", a, self.weight)
             return result + self.bias
 
         mode = self.mode or u.mode

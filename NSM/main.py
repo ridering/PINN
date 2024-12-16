@@ -13,6 +13,7 @@ from src.model.solvers.fno import FNO
 from src.model.solvers.sno import SNO
 from src.pde.pde import PDE
 from src.devices import DEVICE
+from src.validate import evaluate
 
 import torch
 
@@ -63,29 +64,50 @@ def main(cfg: Dict[str, Any]):
 
         if cfg['tensorboard'] > 0:
             wr = writer.SummaryWriter()
+            wr.add_scalar('lr', scheduler.get_last_lr()[0], 0)
+            for param_name, weights in model.named_parameters():
+                flattened_weights = weights.flatten()
+                wr.add_histogram(param_name, flattened_weights,
+                                 0, bins='tensorflow')
+
+        avg_avg_loss = 0.0
 
         for epoch in pbar:
 
             phi = pde.params.sample((cfg['bs'], ))
 
-            ls = []
-
-            optimizer.zero_grad()
+            total_loss = 0.0
             for batch in phi.coef:
-
                 loss = model.loss(pde.basis(batch))['residual']
-
                 loss.backward()
+                total_loss += loss.item()
 
-                ls.append(loss.cpu().detach().numpy())
+            avg_loss = total_loss / cfg['bs']
+
             optimizer.step()
             scheduler.step()
 
-            avg_loss = np.average(ls)
+            optimizer.zero_grad()
+
+            avg_avg_loss += avg_loss
 
             if cfg['tensorboard'] > 0 and (
                     epoch + 1) % cfg['tensorboard'] == 0:
-                wr.add_scalar('loss', avg_loss, epoch + 1)
+                wr.add_scalar('loss', avg_avg_loss / cfg['tensorboard'],
+                              epoch + 1)
+
+                model.eval()
+                metric, predictions = evaluate(model)
+
+                for key, val in metric.items():
+                    wr.add_scalar(key, val, epoch + 1)
+
+                wr.add_image('u[1]_pred',
+                             predictions[1][1][-1].squeeze(),
+                             dataformats="HW",
+                             global_step=epoch + 1)
+                model.train()
+
                 wr.add_scalar('lr', scheduler.get_last_lr()[0], epoch + 1)
                 for param_name, weights in model.named_parameters():
                     flattened_weights = weights.flatten()
@@ -94,6 +116,7 @@ def main(cfg: Dict[str, Any]):
                         flattened_weights,
                         epoch + 1,
                         bins='tensorflow')
+                avg_avg_loss = 0.0
 
             if (epoch + 1) % cfg['ckpt'] == 0:
                 torch.save(

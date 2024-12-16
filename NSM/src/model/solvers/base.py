@@ -1,7 +1,7 @@
 import math
 import functools as F
 from abc import ABC, abstractmethod
-from typing import Dict
+from typing import Dict, Tuple
 
 import torch
 from torch import nn, Tensor
@@ -19,8 +19,8 @@ def lecun_init(param: Tensor):
 
 def linear_lecun_weight_zero_bias(in_features: int, out_features: int) -> nn.Module:
     layer = nn.Linear(in_features, out_features)
-    lecun_init(layer.weight)
-    nn.init.zeros_(layer.bias)
+    # lecun_init(layer.weight)
+    # nn.init.zeros_(layer.bias)
 
     return layer
 
@@ -60,7 +60,8 @@ class Spectral(Solver, ABC, nn.Module):
 
         u = self.forward(phi)
         
-        return u[x]
+        if isinstance(x, Tuple): return u[x]
+        if isinstance(x, Tensor): return u(x)
 
     def loss(self, ϕ: Basis) -> Dict[str, Tensor]:
 
