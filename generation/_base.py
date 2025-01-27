@@ -20,7 +20,7 @@ class Dataset:
             isinstance(num_samples, int) and 1 <= num_samples
         ), "num_samples must be positive integer"
 
-        self._config = {}
+        self.config = {}
 
         config = {}
 
@@ -40,18 +40,17 @@ class Dataset:
         config["ndim"] = len(time_spatial_num_steps)
         config["mesh"] = [num_samples, *time_spatial_num_steps]
 
-        self._config = config
-        self._data = None
+        self.config = config
 
     def generate_random(self): ...
 
     def solve(self): ...
 
     def save(self, path):
-        torch.save(self._config, path)
+        torch.save(self.config, path)
 
     @staticmethod
     def load(path) -> "Dataset":
         dataset = __class__.__new__(__class__)
-        dataset._config = torch.load(path)
+        dataset.config = torch.load(path)
         return dataset
